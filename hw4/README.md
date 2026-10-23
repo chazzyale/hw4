@@ -18,12 +18,12 @@ hw4/
 │   ├── tools.py              │
 │   ├── models.py             ┘
 │   ├── main.py               # FastAPI app (run with Uvicorn): products, accounts, cart, chat routes
-│   ├── scripts/whiten_images.py  # optional: put product photos on white backgrounds
-│   ├── requirements.txt
-│   └── .env.example          # copy to backend/.env (placeholders only)
+│   └── scripts/whiten_images.py  # optional: put product photos on white backgrounds
 ├── frontend/                 # React + Vite + TypeScript website
 ├── data/                     # put the data pack here (see below; not committed)
 ├── output/                   # harness.md, usability.md, design.md, app_check.html, audit_trail.json
+├── requirements.txt          # Python packages for the back end
+├── .env.example              # copy to hw4/.env (placeholders only)
 └── AI_prompts.md             # log of the prompts used to build this homework
 ```
 
@@ -54,18 +54,17 @@ hw4/data/products/*.jpg
 
 ## 2. Configure the back end
 
-Copy the example environment file and add your key:
+From the `hw4/` folder, copy the example environment file and add your key:
 
 ```bash
-cd backend
 cp .env.example .env
 ```
 
-Then edit `backend/.env` and set `PORTKEY_API_KEY`. The other settings have working defaults; see the comments in `.env.example`.
+Then edit `hw4/.env` and set `PORTKEY_API_KEY`. The other settings have working defaults; see the comments in `.env.example`. (The back end finds `.env` by searching upward from `backend/`, so `hw4/.env` is picked up automatically.)
 
 ## 3. Run the back end (FastAPI, port 8000)
 
-From the `backend/` folder:
+From the `hw4/` folder, create a virtual environment and install the Python packages:
 
 ```bash
 python -m venv .venv
@@ -75,6 +74,12 @@ Activate it (Windows: `.venv\Scripts\activate`; macOS/Linux: `source .venv/bin/a
 
 ```bash
 pip install -r requirements.txt
+```
+
+Then start the server from the `backend/` folder (with the virtual environment still active):
+
+```bash
+cd backend
 ```
 
 ```bash
@@ -118,7 +123,7 @@ Open **http://localhost:5175**. The dev server forwards `/api` and `/media` requ
 
 - Restart the back end after editing `backend/prompts/prompt.md` (the agent loads it at startup).
 - The back end creates two extra tables on first run: `cart_items` (account carts) and `password_resets`.
-- Never commit `backend/.env`, the database, or the product images; `.gitignore` already excludes them.
+- Never commit `hw4/.env`, the database, or the product images; `.gitignore` already excludes them.
 
 ## Documentation
 

@@ -202,7 +202,7 @@ Example entry (from testing):
 
 ### Models and services
 
-- **AI model:** `gpt-6-luna` (set with `OPENAI_MODEL`), through the course **Portkey** gateway (`PORTKEY_API_KEY` in `AI Foundations/.env`), using PydanticAI's `OpenAIResponsesModel`. We use the Responses API because this model rejects tool calls on the older chat-completions endpoint.
+- **AI model:** `gpt-6-luna` (set with `OPENAI_MODEL`), through the course **Portkey** gateway (`PORTKEY_API_KEY` in `hw4/.env`; copy `hw4/.env.example`), using PydanticAI's `OpenAIResponsesModel`. We use the Responses API because this model rejects tool calls on the older chat-completions endpoint.
 - **Agent framework:** PydanticAI, with structured output (`AgentReply`) and the 7 approved tools.
 - **Password hashing:** PBKDF2-HMAC-SHA256, 120,000 iterations, salted, stored as `pbkdf2_sha256$salt$hash`.
 - **Email (password reset):** SMTP if `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, and `SMTP_FROM` are set. Otherwise (development), emails are saved in `backend/outbox/`. `SITE_URL` sets the link address.
@@ -229,20 +229,21 @@ Example entry (from testing):
 
 ### How to run the site (front end + back end)
 
-**1. Back end (FastAPI server, port 8000).** From the `backend/` folder, first time only:
+**1. Back end (FastAPI server, port 8000).** From the `hw4/` folder, first time only: copy `.env.example` to `.env` and add the Portkey key, then create a virtual environment and install the packages:
 
 ```
 python -m venv .venv
 .venv/Scripts/python.exe -m pip install -r requirements.txt
 ```
 
-Then start it:
+Then start the server from the `backend/` folder:
 
 ```
-.venv/Scripts/python.exe -m uvicorn main:app --reload --port 8000
+cd backend
+../.venv/Scripts/python.exe -m uvicorn main:app --reload --port 8000
 ```
 
-(With the virtual environment activated, that's simply `uvicorn main:app --reload --port 8000`.)
+(With the virtual environment activated, that's simply `uvicorn main:app --reload --port 8000` from `backend/`.)
 
 **2. Front end (React website, port 5175).** From the `frontend/` folder, first time only `npm install`, then:
 
@@ -252,7 +253,7 @@ npm run dev
 
 Open **http://localhost:5175**. The website forwards `/api` and `/media` requests to the server on port 8000.
 
-**3. One-time image prep** (already done; re-run only if product photos change): from `backend/`, `.venv/Scripts/python.exe scripts/whiten_images.py` puts every product photo on a white background in `data/products_white/`.
+**3. One-time image prep** (already done; re-run only if product photos change): from `backend/`, `python scripts/whiten_images.py` (with the virtual environment active) puts every product photo on a white background in `data/products_white/`.
 
 **Notes:**
 - Restart the back end after editing `prompts/prompt.md`, because the agent loads its instructions once at startup.
@@ -458,7 +459,7 @@ Logged-in chats are saved by the **Save Chat History** tool and reloaded when th
 
 ### How the agent is loaded
 
-- **API key:** `agent.py` loads the nearest `.env` file (the course `PORTKEY_API_KEY` in `AI Foundations/.env`). The key never reaches the browser.
+- **API key:** `agent.py` loads the nearest `.env` file (the `PORTKEY_API_KEY` in `hw4/.env`, copied from `hw4/.env.example`). The key never reaches the browser.
 - **Model:** `OPENAI_MODEL` (default `gpt-6-luna`) through the Portkey gateway, using PydanticAI's `OpenAIResponsesModel`. We use the Responses API because this model rejects tool calls on the chat-completions endpoint.
 - **Prompt:** the text of `prompts/prompt.md` is passed as the agent's `instructions`.
 - **Tools and output:** the tools from `tools.py` are registered, and `output_type=AgentReply` makes the model return structured output: `reply` (Markdown), the flow `step`, the `product_id` being discussed, and `product_ids` to show as cards.

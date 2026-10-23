@@ -59,7 +59,7 @@ from models import (
 )
 from tools import TOOLS, find_product
 
-# Finds the nearest .env walking up from backend/ (the course key lives in AI Foundations/.env).
+# Finds the nearest .env walking up from backend/ (normally hw4/.env, copied from hw4/.env.example).
 load_dotenv(find_dotenv())
 
 PROMPT_PATH = Path(__file__).resolve().parent / "prompts" / "prompt.md"

@@ -329,3 +329,15 @@
 > Yes, commit and push the backend restructure to the GitHub repo.
 
 **What was still lacking:** The restructure was finished and tested locally, but the public GitHub repo still had the old file layout until it was committed and pushed.
+
+**Follow-up prompt 3:**
+
+> ok, thank you. .env.example and requirements.txt also shouldn't be in /backend, but should be directly in hw4 (it should be hw4/requirements.txt, rather than hw4/backend/requirements.txt).
+
+**What was still lacking:** The earlier prompts didn't say where the project-level setup files belong, so requirements.txt and .env.example were left in backend/ instead of the top of hw4/.
+
+**Follow-up prompt 4:**
+
+> Yes, commit and push moving requirements.txt and .env.example into hw4/.
+
+**What was still lacking:** The move was made and tested locally but not yet published, so the GitHub repo still showed the files under backend/.
