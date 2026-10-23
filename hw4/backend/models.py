@@ -7,6 +7,7 @@
 - ProductPreviewResult / PreviewProduct: return type of the "Product Preview" tool (cards shown on the page).
 - ProductCard / SizeStock: product data shown as cards under a chat reply, built from the database.
 - ChatResponse: what POST /api/chat returns to the website, including the Yes/No or size buttons.
+- CartLine / CartUpdate / CartItemOut / CartOut: the saved account cart (PUT/GET /api/cart).
 """
 
 from typing import Literal
@@ -324,4 +325,38 @@ class ChatResponse(BaseModel):
     user_message: str | None = Field(
         default=None,
         description='Set only when a password was removed: the shopper\'s message as saved, with "[password removed]".',
+    )
+
+
+# --- Account carts (used by the cart API routes in main.py) ---
+
+MAX_CART_LINES = 50
+
+
+class CartLine(BaseModel):
+    product_id: str = Field(max_length=200)
+    size: str = Field(max_length=5)
+    quantity: int = Field(ge=0, le=999)
+
+
+class CartUpdate(BaseModel):
+    """PUT /api/cart: the shopper's whole cart, which replaces what's saved."""
+
+    items: list[CartLine] = Field(default_factory=list, max_length=MAX_CART_LINES)
+
+
+class CartItemOut(BaseModel):
+    product_id: str
+    name: str
+    size: str
+    price: float
+    image_url: str
+    quantity: int
+    max: int = Field(description="Units in stock for this size right now.")
+
+
+class CartOut(BaseModel):
+    items: list[CartItemOut]
+    adjusted: list[str] = Field(
+        default_factory=list, description="Lines whose quantity was lowered (or removed) because of stock."
     )

@@ -18,7 +18,6 @@ hw4/
 │   ├── tools.py              │
 │   ├── models.py             ┘
 │   ├── main.py               # FastAPI app (run with Uvicorn): products, accounts, cart, chat routes
-│   ├── auth.py, privacy.py, cart.py, password_reset.py, mailer.py   # supporting web-app modules
 │   ├── scripts/whiten_images.py  # optional: put product photos on white backgrounds
 │   ├── requirements.txt
 │   └── .env.example          # copy to backend/.env (placeholders only)
@@ -28,14 +27,14 @@ hw4/
 └── AI_prompts.md             # log of the prompts used to build this homework
 ```
 
-**The agent** is four files under `backend/`:
+**The agent** is four files under `backend/`. Apart from `main.py` (the FastAPI app that serves them) and the optional image script, all back-end code lives in these files:
 
 | File | What it is |
 |---|---|
 | `prompts/prompt.md` | System prompt: Campus Customs voice, tool flows, safety and audit rules |
 | `agent.py` | Agent entry and wiring: model, prompt, tools, structured output, loop limits, audit trail |
-| `tools.py` | The 7 tools the agent can call (Product Confirmation, Information Output, Product Preview, page context, General Inquiry, catalogue overview) and their database helpers |
-| `models.py` | Pydantic / PydanticAI structured types for requests, tool results, and replies |
+| `tools.py` | The 7 tools the agent can call (Product Confirmation, Information Output, Product Preview, page context, General Inquiry, catalogue overview), their database helpers, and the server-only functions the API uses (accounts and sessions, password reset and its emails, removing passwords from chat, saved chat history, account carts) |
+| `models.py` | Pydantic / PydanticAI structured types for requests, tool results, replies, and the saved cart |
 
 ## Prerequisites
 

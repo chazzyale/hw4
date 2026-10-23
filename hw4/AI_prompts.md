@@ -318,6 +318,14 @@
 >
 > The README.md should explain how to run the front end and back end after placing the data pack.
 
-**Follow-up prompt:** _None yet._
+**Follow-up prompt:**
 
-**What was lacking after the first prompt:** _N/A_
+> For /backend/, there are several .py files that should be part of either agent.py, models.py, tools.py. For files like auth.py, cart.py, mailer.py, password_reset.py, and privacy.py, can you add them to the most appropriate backend folder between agent.py, models.py, or tools.py? Which I imagine is in tools.py
+
+**What was lacking after the first prompt:** The first prompt asked for the agent to be four files but didn't say where the supporting modules (auth, cart, mailer, password reset, privacy) should live, so they were left as separate backend files.
+
+**Follow-up prompt 2:**
+
+> Yes, commit and push the backend restructure to the GitHub repo.
+
+**What was still lacking:** The restructure was finished and tested locally, but the public GitHub repo still had the old file layout until it was committed and pushed.

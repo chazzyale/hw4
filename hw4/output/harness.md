@@ -101,7 +101,7 @@ The agent and the website exchange **structured data** with fixed fields, not fr
 
 ### Server-side functions the agent cannot call
 
-**Save Chat History** (`save_chat_history`), load chat history, and get customer run automatically for logged-in shoppers. The model is never given them, so it can't read or write customer records. The password filter (`privacy.py`), carts (`cart.py`), password reset (`password_reset.py`), and the audit-trail writer (inside `agent.py`) are also server-only.
+**Save Chat History** (`save_chat_history`), load chat history, and get customer run automatically for logged-in shoppers. The model is never given them, so it can't read or write customer records. The password filter, carts, accounts, and password reset (all in `tools.py`, outside the `TOOLS` list) and the audit-trail writer (in `agent.py`) are also server-only.
 
 ### What the site can do for shoppers
 
@@ -129,7 +129,7 @@ These rules are written into the agent's instructions (`backend/prompts/prompt.m
 **Customer privacy**
 - The agent **never reveals personal information** about any other customer. It sees only the logged-in shopper's own name and email, and may share those only with that shopper.
 - The agent **never reveals or resets a password**, no matter how many times or how cleverly it is asked. It points shoppers to the self-service "Forgot your password?" reset. *(Enforced: the agent has no tool that can read or write accounts or passwords.)*
-- **Passwords typed into the chat are removed** before anything is saved or sent to the AI. *(Enforced in `privacy.py`.)*
+- **Passwords typed into the chat are removed** before anything is saved or sent to the AI. *(Enforced in code: `clean_message()` in `tools.py`.)*
 - Passwords are stored only as salted PBKDF2 hashes. Reset links expire after 30 minutes, work once, and sign out every other device.
 
 **Respectful, positive shopping**
@@ -216,18 +216,14 @@ Example entry (from testing):
 |---|---|
 | `backend/prompts/prompt.md` | The system prompt: the Campus Customs voice, the tool flows, and the safety and audit rules. |
 | `backend/agent.py` | The agent's entry point and wiring: model, prompt, tools, structured output, flow state, loop limits, owner flags, and the append-only audit trail. |
-| `backend/tools.py` | The 7 tools the agent can call, plus the read-only database helpers they use (shared with the API) and the server-only Save Chat History functions. |
-| `backend/models.py` | The Pydantic / PydanticAI structured types (see section 2). |
+| `backend/tools.py` | The 7 tools the agent can call and the database helpers they use, plus **server-only functions the agent is never given**: accounts (password hashing, login sessions), self-service password reset and its emails, removing passwords from chat messages, Save Chat History, and account carts. The API in `main.py` calls these; only the 7 tools in `TOOLS` are given to the model. |
+| `backend/models.py` | The Pydantic / PydanticAI structured types (see section 2), including the saved-cart types (`CartLine`, `CartUpdate`, `CartItemOut`, `CartOut`). |
 
-**Supporting web-app files (not part of the agent):**
+**Other files:**
 
 | File | Role |
 |---|---|
 | `backend/main.py` | The FastAPI app (run with Uvicorn): product, image, account, cart, password-reset, Show More, and chat routes. |
-| `backend/auth.py` | Password hashing and login sessions. |
-| `backend/privacy.py` | Removes passwords from chat messages. |
-| `backend/cart.py` | Account carts (`cart_items`). |
-| `backend/password_reset.py`, `backend/mailer.py` | Self-service password reset and its emails. |
 | `backend/scripts/whiten_images.py` | One-time prep that puts product photos on white backgrounds. |
 | `frontend/` | The React + Vite + TypeScript website. |
 
@@ -326,7 +322,7 @@ The source of truth for the history of chats with the chatbot.
 
 ## Authentication
 
-Shoppers can create an account and log in. The code lives in `backend/auth.py` (hashing and sessions) and `backend/main.py` (the `/api/auth/*` endpoints).
+Shoppers can create an account and log in. The code lives in `backend/tools.py` (hashing and sessions, server-only) and `backend/main.py` (the `/api/auth/*` endpoints).
 
 ### Create account (`POST /api/auth/register`)
 
@@ -356,7 +352,7 @@ Shoppers can create an account and log in. The code lives in `backend/auth.py` (
 1. **We never un-hash the stored value.** A hash can't be reversed. At login we re-hash what the user typed and compare the two hashes.
 2. **Read the salt out of the stored string. Never make a new one at login.** Split `pbkdf2_sha256$<salt>$<hash>` on `$` and use that `<salt>`. A new salt would produce a different hash, and even the right password would fail.
 3. **Hash the typed password with that same salt, then compare it to the stored hash using a constant-time compare** (`hmac.compare_digest`). A normal `==` can finish faster when the first characters differ, and an attacker could time that. A constant-time compare always takes the same time.
-4. **Signup and login must use the same hash settings:** the same function (PBKDF2-HMAC-SHA256), the same salt handling (salt string encoded as UTF-8), the same iteration count (120,000), and the same output format (hex). If any of these differ, even the right password will not match. To guarantee this, signup and login both call the same function, `hash_password()` in `backend/auth.py`, which keeps these settings in one place.
+4. **Signup and login must use the same hash settings:** the same function (PBKDF2-HMAC-SHA256), the same salt handling (salt string encoded as UTF-8), the same iteration count (120,000), and the same output format (hex). If any of these differ, even the right password will not match. To guarantee this, signup and login both call the same function, `hash_password()` in `backend/tools.py`, which keeps these settings in one place.
 5. **Unknown emails get the same work as wrong passwords.** If the email isn't found, we still run one hash check against a dummy hash, so response time doesn't reveal whether an account exists.
 
 ### Self-service password reset
@@ -371,7 +367,7 @@ A customer who forgets their password can reset it themselves, without contactin
 4. The link opens **"Choose a new password"**, with New password and Confirm new password fields. The same rules as signup apply: at least 8 characters, and both must match (checked in the browser and again on the server).
 5. On success, the customer is **logged in with the new password** and taken to the Home page.
 
-**How it's kept secure** (`backend/password_reset.py`)
+**How it's kept secure** (password-reset functions in `backend/tools.py`)
 
 - **Random, secret token:** each link holds a 256-bit random token (`secrets.token_urlsafe(32)`). Only a **SHA-256 hash of the token** is stored, so a copy of the database can't be used to reset anyone's password.
 - **Expires in 30 minutes and works once.** Using a link, or completing any reset, cancels every other outstanding link for that account.
@@ -398,7 +394,7 @@ A customer who forgets their password can reset it themselves, without contactin
 - `POST /api/auth/reset-password/check` `{ token }`: `{ "valid": true/false }`, so the page can say right away if a link has expired.
 - `POST /api/auth/reset-password` `{ token, password, confirm_password }`: sets the new password and returns a new login session.
 
-**Sending the email** (`backend/mailer.py`)
+**Sending the email** (`send_email()` in `backend/tools.py`)
 
 - **With an email server:** set `SMTP_HOST` (plus `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`) in `.env`, and reset emails are sent through it. `SITE_URL` sets the link's address (default `http://localhost:5175`).
 - **In development, with no email server:** each email is saved as a text file in `backend/outbox/` instead of being sent, and the server log names the file. Open the newest file to find the reset link.
@@ -603,7 +599,7 @@ Anyone can chat with the agent. **Only logged-in shoppers' chats are saved**, an
 | `products_json` | **Assistant messages only:** a JSON snapshot of the products shown with that reply (chat product cards and Product Preview cards on the page), with catalogue fields, `image_file_path`, `image_url`, price, stock by size, and `total_stock`. Empty if no products were shown. |
 | `created_at` | A timestamp set by the database when the row is written (`datetime('now')`, UTC). |
 
-- **Passwords are never stored.** Before a message is saved, or sent to the model, `backend/privacy.py` removes any password it contains and puts `[password removed]` in its place (see "Passwords typed into the chat" below). So `content` never holds a password.
+- **Passwords are never stored.** Before a message is saved, or sent to the model, `clean_message()` in `backend/tools.py` removes any password it contains and puts `[password removed]` in its place (see "Passwords typed into the chat" below). So `content` never holds a password.
 - **Order of saving:** the shopper's message is saved **before** the agent runs, so it's kept even if the agent fails. The reply is saved after.
 - **Why the server runs it, not the model:** the tool lives in `tools.py` like the others, but the API route calls it for every message instead of leaving it to the model. That guarantees no message is skipped, and the model can never write to `chat_messages` or choose whose history to touch. The `user_id` always comes from the verified login session.
 - It returns a `SavedChatMessage` (`id`, `user_id`, `role`, `content`, `products_json`, `created_at`): the row exactly as stored.
@@ -653,7 +649,7 @@ The agent understands what page the shopper is on, so "this" means the product o
 
 Even with the agent's guardrails, a shopper might type a password into the chat ("my password is ...", "reset my password to ..."). Without protection, it would be saved in `chat_messages` and sent to the model. Now **a password typed into the chat is never stored and never sent to the model.**
 
-How it works (`backend/privacy.py`, run by `/api/chat` on every message **before** saving or calling the agent):
+How it works (`clean_message()` in `backend/tools.py`, run by `/api/chat` on every message **before** saving or calling the agent):
 
 1. **Lead-in phrases (everyone, including guests):** a word that follows a password phrase is removed: "password is X", "password: X", "pwd = X", "password to X", "password should be X", and similar. Ordinary words that follow those phrases ("change my password to *something*", "*wrong*", "*safe*") are left alone.
 2. **The shopper's real password (logged-in shoppers):** each longer word in the message (6+ characters, up to 20 words, words with digits or symbols checked first) is checked against **their own stored password hash**, using the same PBKDF2 check as login (about 55 ms each). This catches a password typed with no lead-in, like "here it is Bulldog#2026". The check only compares hashes; the password itself is never logged or written anywhere.
@@ -713,7 +709,7 @@ Logged-in shoppers' carts are tied to their account, so the cart follows them ac
 
 ### New table: `cart_items`
 
-Created automatically when the backend starts (`CREATE TABLE IF NOT EXISTS`, in `backend/cart.py`).
+Created automatically when the backend starts (`CREATE TABLE IF NOT EXISTS`, `ensure_cart_table()` in `backend/tools.py`).
 
 | Field | Type | Why it matters |
 |---|---|---|

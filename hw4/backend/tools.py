@@ -18,14 +18,27 @@ chat_messages tables for the logged-in shopper only. The server calls them; they
 """
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import json
+import logging
 import math
 import os
 import re
+import secrets
+import smtplib
 import sqlite3
+import time
+from email.message import EmailMessage
 from pathlib import Path
 
+from dotenv import find_dotenv, load_dotenv
+
 from models import (
+    CartLine,
+    CartItemOut,
+    CartOut,
     MAX_PREVIEW_CARDS,
     PREVIEW_NOT_FOUND_REPLY,
     CustomerInfo,
@@ -44,6 +57,9 @@ from models import (
     SimilarProductsResult,
     SizeQuantity,
 )
+
+# Settings such as SITE_URL, SMTP_*, and CC_SESSION_SECRET are read at import time, so load .env first.
+load_dotenv(find_dotenv())
 
 
 # --- Database access and product shaping (shared with the API routes in main.py) ---
@@ -819,6 +835,404 @@ def get_customer(user_id: int) -> CustomerInfo | None:
     with get_db() as conn:
         row = conn.execute("SELECT id, name, email FROM users WHERE id = ?", (user_id,)).fetchone()
     return CustomerInfo(**dict(row)) if row else None
+
+
+# ============================================================================
+# Accounts: password hashing and login sessions (server-only; not an agent tool)
+# ============================================================================
+# Password hashing and login sessions for Campus Customs.
+#
+# Stored format (matches the seed database): pbkdf2_sha256$<salt>$<hex digest>
+# - PBKDF2-HMAC-SHA256, 120,000 iterations, salt string encoded as UTF-8.
+# - Signup and login both go through hash_password(), so the settings can never drift apart.
+
+ALGORITHM = "pbkdf2_sha256"
+ITERATIONS = 120_000
+SALT_BYTES = 8  # 8 random bytes -> 16 hex characters, same shape as the seed users' salts
+SESSION_TTL_SECONDS = 7 * 24 * 60 * 60
+
+
+def hash_password(password: str, salt: str) -> str:
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt.encode("utf-8"), ITERATIONS)
+    return f"{ALGORITHM}${salt}${digest.hex()}"
+
+
+def make_password_hash(password: str) -> str:
+    """Signup: a fresh random salt per user, stored inside the hash string."""
+    return hash_password(password, secrets.token_hex(SALT_BYTES))
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Login: never un-hash. Read the salt from the stored string, re-hash what was typed, compare."""
+    try:
+        algorithm, salt, _ = stored.split("$")
+    except ValueError:
+        return False
+    if algorithm != ALGORITHM:
+        return False
+    return hmac.compare_digest(hash_password(password, salt), stored)
+
+
+# Used when an email isn't registered, so a login attempt costs the same either way
+# and response time doesn't reveal which emails have accounts.
+DUMMY_HASH = make_password_hash(secrets.token_hex(16))
+
+
+# --- Sessions: a signed token "payload.signature" carrying the user id and expiry ---
+
+def _load_secret() -> bytes:
+    if env := os.environ.get("CC_SESSION_SECRET"):
+        return env.encode()
+    path = Path(__file__).resolve().parent / ".session_secret"
+    if not path.exists():
+        path.write_text(secrets.token_hex(32))
+    return path.read_text().strip().encode()
+
+
+SECRET = _load_secret()
+
+
+def _b64(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode()
+
+
+def _sign(payload: str) -> str:
+    return _b64(hmac.new(SECRET, payload.encode(), hashlib.sha256).digest())
+
+
+def password_fingerprint(password_hash: str) -> str:
+    """A short fingerprint of the stored hash. Sessions carry it, so changing the password ends old sessions."""
+    return hashlib.sha256(password_hash.encode()).hexdigest()[:16]
+
+
+def create_session_token(user_id: int, password_hash: str) -> str:
+    claims = {"uid": user_id, "pv": password_fingerprint(password_hash), "exp": int(time.time()) + SESSION_TTL_SECONDS}
+    payload = _b64(json.dumps(claims).encode())
+    return f"{payload}.{_sign(payload)}"
+
+
+def session_is_current(claims: dict, password_hash: str) -> bool:
+    """False if the password changed (e.g. after a reset) since this session was created."""
+    return hmac.compare_digest(str(claims.get("pv", "")), password_fingerprint(password_hash))
+
+
+def read_session_token(token: str) -> dict | None:
+    """Return the claims ({"uid", "pv", "exp"}) of a valid, unexpired token, else None."""
+    try:
+        payload, signature = token.split(".")
+    except ValueError:
+        return None
+    if not hmac.compare_digest(_sign(payload), signature):
+        return None
+    try:
+        data = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+    except ValueError:
+        return None
+    if data.get("exp", 0) < time.time() or "uid" not in data:
+        return None
+    return data
+
+
+# ============================================================================
+# Email for password-reset links (server-only)
+# ============================================================================
+# Outgoing email (used for password reset links).
+#
+# - If SMTP_HOST is set in .env, mail is sent through that server (SMTP_PORT, SMTP_USER, SMTP_PASSWORD,
+#   SMTP_FROM; STARTTLS on port 587).
+# - Otherwise (development), each email is saved as a text file in backend/outbox/ instead of being sent,
+#   so the reset flow can be tested without an email service. Open the newest file to find the link.
+
+OUTBOX = Path(__file__).resolve().parent / "outbox"
+mail_log = logging.getLogger("campus_customs")
+
+
+def send_email(to: str, subject: str, body: str) -> None:
+    sender = os.getenv("SMTP_FROM", "Campus Customs <no-reply@campuscustoms.example>")
+    host = os.getenv("SMTP_HOST")
+    if host:
+        msg = EmailMessage()
+        msg["From"], msg["To"], msg["Subject"] = sender, to, subject
+        msg.set_content(body)
+        with smtplib.SMTP(host, int(os.getenv("SMTP_PORT", "587")), timeout=15) as smtp:
+            smtp.starttls()
+            if user := os.getenv("SMTP_USER"):
+                smtp.login(user, os.getenv("SMTP_PASSWORD", ""))
+            smtp.send_message(msg)
+        return
+
+    OUTBOX.mkdir(exist_ok=True)
+    safe_to = re.sub(r"[^a-z0-9]+", "-", to.lower()).strip("-")
+    path = OUTBOX / f"{time.strftime('%Y%m%d-%H%M%S')}-{time.time_ns() % 1_000_000:06d}-{safe_to}.txt"  # unique per email
+    path.write_text(f"From: {sender}\nTo: {to}\nSubject: {subject}\n\n{body}\n", encoding="utf-8")
+    mail_log.warning("No SMTP server configured; email to %s saved to %s", to, path)
+
+
+# ============================================================================
+# Self-service password reset (server-only)
+# ============================================================================
+# Self-service password reset.
+#
+# 1. The shopper enters their email on "Forgot your password?". If it belongs to an account, a one-time
+#    reset link is emailed to that address (send_email below). The response is the same either way, so the
+#    page never reveals which emails have accounts.
+# 2. The link holds a random token. Only a SHA-256 hash of it is stored (password_resets table), it
+#    expires after 30 minutes, and it works once.
+# 3. On the reset page the shopper chooses a new password (same rules as signup). It is hashed exactly
+#    like signup (auth.make_password_hash: PBKDF2-HMAC-SHA256, 120,000 iterations, new random salt),
+#    all of the account's reset links are cancelled, and every old login session ends.
+
+RESET_TTL_SECONDS = 30 * 60
+MAX_REQUESTS_PER_HOUR = 3
+SITE_URL = os.getenv("SITE_URL", "http://localhost:5175")
+
+
+def ensure_password_reset_table() -> None:
+    with get_db(writable=True) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS password_resets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                token_hash TEXT NOT NULL UNIQUE,
+                expires_at INTEGER NOT NULL,
+                used_at TEXT,
+                created_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+            """
+        )
+
+
+def _reset_token_hash(token: str) -> str:
+    return hashlib.sha256(token.encode()).hexdigest()
+
+
+def request_reset(email: str) -> None:
+    """Email a reset link if the address has an account. Silently does nothing otherwise."""
+    email = email.strip().lower()
+    with get_db(writable=True) as conn:
+        user = conn.execute("SELECT id, first_name, name, email FROM users WHERE lower(email) = ?", (email,)).fetchone()
+        if user is None:
+            return
+        recent = conn.execute(
+            "SELECT count(*) FROM password_resets WHERE user_id = ? AND created_at >= datetime('now', '-1 hour')",
+            (user["id"],),
+        ).fetchone()[0]
+        if recent >= MAX_REQUESTS_PER_HOUR:  # stop someone flooding a customer's inbox
+            return
+        token = secrets.token_urlsafe(32)
+        conn.execute(
+            "INSERT INTO password_resets (user_id, token_hash, expires_at) VALUES (?, ?, ?)",
+            (user["id"], _reset_token_hash(token), int(time.time()) + RESET_TTL_SECONDS),
+        )
+    link = f"{SITE_URL}/reset-password?token={token}"
+    send_email(
+        user["email"],
+        "Reset your Campus Customs password",
+        f"Hi {user['first_name'] or user['name']},\n\n"
+        "We received a request to reset the password for your Campus Customs account.\n"
+        f"Choose a new password here (this link works once and expires in {RESET_TTL_SECONDS // 60} minutes):\n\n"
+        f"{link}\n\n"
+        "If you didn't ask for this, you can ignore this email; your password won't change.\n\n"
+        "Boola Boola!\nCampus Customs, 57 Broadway, New Haven",
+    )
+
+
+def _valid_reset(conn: sqlite3.Connection, token: str) -> sqlite3.Row | None:
+    return conn.execute(
+        "SELECT * FROM password_resets WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?",
+        (_reset_token_hash(token), int(time.time())),
+    ).fetchone()
+
+
+def token_is_valid(token: str) -> bool:
+    with get_db() as conn:
+        return _valid_reset(conn, token) is not None
+
+
+def complete_reset(token: str, new_password: str) -> sqlite3.Row | None:
+    """Set the new password if the token is valid. Returns the updated user row, or None."""
+    with get_db(writable=True) as conn:
+        reset = _valid_reset(conn, token)
+        if reset is None:
+            return None
+        conn.execute(
+            "UPDATE users SET password_hash = ? WHERE id = ?",
+            (make_password_hash(new_password), reset["user_id"]),
+        )
+        # This link and any other outstanding links for the account stop working.
+        conn.execute(
+            "UPDATE password_resets SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL",
+            (reset["user_id"],),
+        )
+        return conn.execute("SELECT * FROM users WHERE id = ?", (reset["user_id"],)).fetchone()
+
+
+# ============================================================================
+# Chat privacy: never store or forward a password typed into the chat (server-only)
+# ============================================================================
+# Keep passwords out of the chat: never stored in chat_messages, never sent to the model.
+#
+# Two checks run on every chat message before it is saved or given to the agent:
+# 1. Phrases that introduce a password ("my password is X", "password: X", "reset my password to X")
+#    -> X is removed. Works for guests and logged-in shoppers.
+# 2. Logged-in shoppers only: each longer word in the message is checked against their stored
+#    password hash (the same PBKDF2 check as login). A match means they typed their real password,
+#    even with no lead-in phrase, so it is removed. The password itself is never stored or logged.
+
+REDACTED = "[password removed]"
+MIN_CANDIDATE_LEN = 6
+MAX_HASH_CHECKS = 20  # ~55 ms each, so at most about a second per message
+
+# "password is X", "pwd: X", "passcode = X", "password to X", "password should be X", ...
+LEAD_IN = re.compile(
+    r"\b(?:pass\s?(?:word|code|phrase)|pwd|pw)s?\b\s*(?:is|was|=|:|-|to|should be|will be|would be)\s*"
+    r"[\"'“‘]?(?P<secret>[^\s\"'”’]+)",
+    re.IGNORECASE,
+)
+# Words that follow "password to/is" in normal sentences, not real passwords.
+NOT_SECRETS = {
+    "something", "anything", "what", "the", "a", "an", "my", "it", "be", "reset", "change", "new",
+    "forgotten", "forgot", "wrong", "incorrect", "correct", "right", "safe", "secure", "stronger", "longer",
+    "shown", "visible", "saved", "stored", "reset?", "work", "working", "not",
+}
+
+
+PUNCTUATION = ".,!?;:()[]{}<>\"'“”‘’"
+
+
+def _word_spans(text: str) -> list[tuple[int, int]]:
+    """(start, end) of each whitespace-separated word, with surrounding punctuation trimmed off."""
+    spans = []
+    for m in re.finditer(r"\S+", text):
+        start, end = m.start(), m.end()
+        while start < end and text[start] in PUNCTUATION:
+            start += 1
+        while end > start and text[end - 1] in PUNCTUATION:
+            end -= 1
+        if end > start:
+            spans.append((start, end))
+    return spans
+
+
+def find_secret_spans(text: str, password_hash: str | None = None) -> list[tuple[int, int]]:
+    """Character positions in the text that hold a password."""
+    spans: set[tuple[int, int]] = set()
+    for m in LEAD_IN.finditer(text):
+        start, end = m.span("secret")
+        while end > start and text[end - 1] in PUNCTUATION:
+            end -= 1
+        if end > start and text[start:end].lower() not in NOT_SECRETS:
+            spans.add((start, end))
+    if password_hash:
+        by_word: dict[str, list[tuple[int, int]]] = {}
+        for start, end in _word_spans(text):
+            if end - start >= MIN_CANDIDATE_LEN:
+                by_word.setdefault(text[start:end], []).append((start, end))
+        # Words with digits or symbols look most like passwords, so check those first.
+        for word in sorted(by_word, key=str.isalpha)[:MAX_HASH_CHECKS]:
+            if verify_password(word, password_hash):
+                spans.update(by_word[word])  # every place they typed it
+    return sorted(spans)
+
+
+def clean_message(text: str, password_hash: str | None = None) -> tuple[str, bool]:
+    """Return the message with any passwords replaced by "[password removed]", and whether anything was removed."""
+    spans = find_secret_spans(text, password_hash)
+    if not spans:
+        return text, False
+    out, last = [], 0
+    for start, end in spans:
+        if start < last:  # overlapping match, already removed
+            continue
+        out += [text[last:start], REDACTED]
+        last = end
+    out.append(text[last:])
+    return "".join(out), True
+
+
+# ============================================================================
+# Account carts (server-only)
+# ============================================================================
+# Account carts: a logged-in shopper's cart is stored in the cart_items table, so it follows them
+# across devices and sessions. Guests keep their cart in the browser only.
+#
+# Quantities are always limited to live inventory, and there is no checkout.
+
+def ensure_cart_table() -> None:
+    """Create cart_items if it doesn't exist yet (run once at startup)."""
+    with get_db(writable=True) as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cart_items (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL,
+                product_id TEXT NOT NULL,
+                size TEXT NOT NULL,
+                quantity INTEGER NOT NULL CHECK (quantity > 0),
+                updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (product_id) REFERENCES catalogue(product_id),
+                UNIQUE (user_id, product_id, size)
+            )
+            """
+        )
+
+
+def _validated(lines: list[CartLine]) -> tuple[list[tuple[dict, str, int, int]], list[str]]:
+    """Merge duplicate lines, drop unknown products/sizes, and limit quantities to live stock."""
+    merged: dict[tuple[str, str], int] = {}
+    for line in lines:
+        key = (line.product_id, line.size.upper())
+        merged[key] = merged.get(key, 0) + line.quantity
+    out, adjusted = [], []
+    for (pid, size), qty in merged.items():
+        product = find_product(pid)
+        if product is None or size not in SIZE_ORDER or qty <= 0:
+            continue
+        stock = next((s["quantity"] for s in product["inventory"] if s["size"] == size), 0)
+        if qty > stock:
+            adjusted.append(f"{product['name']} ({size})")
+            qty = stock
+        if qty > 0:
+            out.append((product, size, qty, stock))
+    return out, adjusted
+
+
+def _to_out(rows: list[tuple[dict, str, int, int]], adjusted: list[str]) -> CartOut:
+    return CartOut(
+        items=[
+            CartItemOut(
+                product_id=p["product_id"], name=p["name"], size=size, price=p["price"],
+                image_url=p["image_url"], quantity=qty, max=stock,
+            )
+            for p, size, qty, stock in rows
+        ],
+        adjusted=adjusted,
+    )
+
+
+def load_cart(user_id: int) -> CartOut:
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT product_id, size, quantity FROM cart_items WHERE user_id = ? ORDER BY id", (user_id,)
+        ).fetchall()
+    lines = [CartLine(product_id=r["product_id"], size=r["size"], quantity=r["quantity"]) for r in rows]
+    valid, adjusted = _validated(lines)
+    return _to_out(valid, adjusted)
+
+
+def save_cart(user_id: int, lines: list[CartLine]) -> CartOut:
+    """Replace the shopper's saved cart with these lines (limited to stock) and return it."""
+    valid, adjusted = _validated(lines)
+    with get_db(writable=True) as conn:
+        conn.execute("DELETE FROM cart_items WHERE user_id = ?", (user_id,))
+        conn.executemany(
+            "INSERT INTO cart_items (user_id, product_id, size, quantity) VALUES (?, ?, ?, ?)",
+            [(user_id, p["product_id"], size, qty) for p, size, qty, _ in valid],
+        )
+    return _to_out(valid, adjusted)
 
 
 # Tools the model can call. Save Chat History, load_chat_history, and get_customer are deliberately

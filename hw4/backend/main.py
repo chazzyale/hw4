@@ -1,6 +1,6 @@
 """Campus Customs API (run from backend/: uvicorn main:app --reload --port 8000).
 
-Serves the product catalogue and images, account signup/login (auth.py), and the
+Serves the product catalogue and images, account signup/login (tools.py), and the
 shop chatbot (agent.py, a PydanticAI agent).
 """
 
@@ -17,13 +17,11 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import agent
-import auth
-import cart
-import password_reset
-import privacy
 import tools
 from tools import DATA_DIR, all_products, find_product, get_db, strip_image_url
 from models import (
+    CartUpdate,
+    CartOut,
     HISTORY_RELOAD_LIMIT,
     MAX_PREVIEW_CARDS,
     ChatHistoryResponse,
@@ -36,8 +34,8 @@ log = logging.getLogger("campus_customs")
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    cart.ensure_table()  # account carts live in cart_items (created on first run)
-    password_reset.ensure_table()  # one-time password reset links
+    tools.ensure_cart_table()  # account carts live in cart_items (created on first run)
+    tools.ensure_password_reset_table()  # one-time password reset links
     yield
 
 
@@ -120,7 +118,7 @@ def public_user(row: sqlite3.Row) -> dict:
 
 
 def session_response(row: sqlite3.Row) -> dict:
-    return {"token": auth.create_session_token(row["id"], row["password_hash"]), "user": public_user(row)}
+    return {"token": tools.create_session_token(row["id"], row["password_hash"]), "user": public_user(row)}
 
 
 def check_new_password(password: str, confirm_password: str) -> None:
@@ -141,7 +139,7 @@ def register(body: RegisterRequest) -> dict:
         raise HTTPException(400, "Enter a valid email address.")
     check_new_password(body.password, body.confirm_password)
 
-    password_hash = auth.make_password_hash(body.password)
+    password_hash = tools.make_password_hash(body.password)
     with get_db(writable=True) as conn:
         try:
             cur = conn.execute(
@@ -160,8 +158,8 @@ def login(body: LoginRequest) -> dict:
     with get_db() as conn:
         row = conn.execute("SELECT * FROM users WHERE lower(email) = ?", (email,)).fetchone()
     # Always run one hash check so unknown emails take as long as wrong passwords.
-    stored = row["password_hash"] if row else auth.DUMMY_HASH
-    if not auth.verify_password(body.password, stored) or row is None:
+    stored = row["password_hash"] if row else tools.DUMMY_HASH
+    if not tools.verify_password(body.password, stored) or row is None:
         raise HTTPException(401, "Incorrect email or password.")
     return session_response(row)
 
@@ -183,7 +181,7 @@ def product_preview_page(body: PreviewPageRequest) -> ProductPreviewResult:
     return tools._preview(body.query, body.offset, body.limit)
 
 
-# --- Self-service password reset (password_reset.py) ---
+# --- Self-service password reset (tools.py) ---
 
 RESET_SENT_MESSAGE = (
     "If an account exists for that email, we've sent a link to reset your password. "
@@ -209,19 +207,19 @@ class ResetPasswordRequest(BaseModel):
 def forgot_password(body: ForgotPasswordRequest) -> dict:
     """Always the same answer, so the page never reveals which emails have accounts."""
     if EMAIL_RE.match(body.email.strip().lower()):
-        password_reset.request_reset(body.email)
+        tools.request_reset(body.email)
     return {"message": RESET_SENT_MESSAGE}
 
 
 @app.post("/api/auth/reset-password/check")
 def check_reset_link(body: ResetTokenRequest) -> dict:
-    return {"valid": password_reset.token_is_valid(body.token)}
+    return {"valid": tools.token_is_valid(body.token)}
 
 
 @app.post("/api/auth/reset-password")
 def reset_password(body: ResetPasswordRequest) -> dict:
     check_new_password(body.password, body.confirm_password)
-    row = password_reset.complete_reset(body.token, body.password)
+    row = tools.complete_reset(body.token, body.password)
     if row is None:
         raise HTTPException(400, "This reset link is invalid or has expired. Please request a new one.")
     return session_response(row)  # logged in with the new password; older sessions have ended
@@ -230,13 +228,13 @@ def reset_password(body: ResetPasswordRequest) -> dict:
 def session_user(authorization: str | None) -> sqlite3.Row | None:
     """The logged-in user for an "Authorization: Bearer <token>" header, or None."""
     token = (authorization or "").removeprefix("Bearer ").strip()
-    claims = auth.read_session_token(token) if token else None
+    claims = tools.read_session_token(token) if token else None
     if claims is None:
         return None
     with get_db() as conn:
         row = conn.execute("SELECT * FROM users WHERE id = ?", (claims["uid"],)).fetchone()
     # A password reset ends every session that was created with the old password.
-    if row is None or not auth.session_is_current(claims, row["password_hash"]):
+    if row is None or not tools.session_is_current(claims, row["password_hash"]):
         return None
     return row
 
@@ -278,21 +276,21 @@ def products_snapshot(product_ids: list[str]) -> str | None:
 # --- Account cart ---
 
 @app.get("/api/cart")
-def get_cart(authorization: str | None = Header(default=None)) -> cart.CartOut:
+def get_cart(authorization: str | None = Header(default=None)) -> CartOut:
     """The logged-in shopper's saved cart, with live prices and stock."""
     user = session_user(authorization)
     if user is None:
         raise HTTPException(401, "Log in to see your saved cart.")
-    return cart.load_cart(user["id"])
+    return tools.load_cart(user["id"])
 
 
 @app.put("/api/cart")
-def put_cart(body: cart.CartUpdate, authorization: str | None = Header(default=None)) -> cart.CartOut:
+def put_cart(body: CartUpdate, authorization: str | None = Header(default=None)) -> CartOut:
     """Save the logged-in shopper's whole cart (quantities are limited to what's in stock)."""
     user = session_user(authorization)
     if user is None:
         raise HTTPException(401, "Log in to save your cart.")
-    return cart.save_cart(user["id"], body.items)
+    return tools.save_cart(user["id"], body.items)
 
 
 @app.get("/api/chat/history")
@@ -321,8 +319,8 @@ async def chat(body: ChatRequest, authorization: str | None = Header(default=Non
     # Never store a password typed into the chat, and never send it to the model: remove it first.
     # Logged-in shoppers' messages are also checked against their own password hash.
     password_hash = user["password_hash"] if user is not None else None
-    cleaned, redacted = await asyncio.to_thread(privacy.clean_message, body.message, password_hash)
-    history = [t.model_copy(update={"content": privacy.clean_message(t.content)[0]}) for t in body.history]
+    cleaned, redacted = await asyncio.to_thread(tools.clean_message, body.message, password_hash)
+    history = [t.model_copy(update={"content": tools.clean_message(t.content)[0]}) for t in body.history]
     body = body.model_copy(update={"message": cleaned, "history": history})
 
     saved_history = None

@@ -24,7 +24,7 @@ This round adds two front-end improvements and two backend improvements to the C
   - The server always limits quantities to live stock when it saves or loads a cart.
 - **No checkout, on purpose.** We are explicitly not building a "Checkout" option yet, so the site can't take a purchase. The cart summary invites shoppers to bring their list to the store at 57 Broadway, and the chatbot knows the cart exists but that there's no online checkout.
 
-Files: `frontend/src/shop.tsx` (cart state and account sync), `backend/cart.py` and `GET`/`PUT /api/cart` in `backend/main.py` (account carts), `frontend/src/pages/Cart.tsx`, `frontend/src/pages/ProductDetail.tsx` (Add to Cart), `frontend/src/components/NavBar.tsx` (cart icon).
+Files: `frontend/src/shop.tsx` (cart state and account sync), the cart functions in `backend/tools.py` and `GET`/`PUT /api/cart` in `backend/main.py` (account carts), `frontend/src/pages/Cart.tsx`, `frontend/src/pages/ProductDetail.tsx` (Add to Cart), `frontend/src/components/NavBar.tsx` (cart icon).
 
 ### Why it helps
 
@@ -58,7 +58,7 @@ Files: `frontend/src/components/RecentPicks.tsx`, `frontend/src/shop.tsx` (recen
 ### What we added
 
 - Even with the chatbot's guardrails, a shopper could type their password into the chat, and it would have been saved in the `chat_messages` history (and sent to the AI model). Now **a password typed into the chat is never stored.**
-- Every chat message is cleaned by `backend/privacy.py` **before** it is saved and **before** it reaches the agent:
+- Every chat message is cleaned by `clean_message()` in `backend/tools.py` **before** it is saved and **before** it reaches the agent:
   1. Anything following a password phrase ("my password is …", "password: …", "reset my password to …") is removed, for guests and logged-in shoppers.
   2. For logged-in shoppers, each longer word is also checked against **their own stored password hash**, using the same secure check as login. That catches their real password even when it's typed on its own ("here it is Bulldog#2026"). The check only compares hashes; the password itself is never written anywhere.
   3. Each match becomes **`[password removed]`** in the saved message, in what the agent sees, and on the shopper's screen.
