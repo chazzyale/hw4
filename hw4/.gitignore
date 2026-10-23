@@ -1,0 +1,29 @@
+# ---- Secrets and local config (never commit) ----
+.env
+.env.*
+!.env.example
+backend/.session_secret
+
+# ---- Data pack (not in the repo): the database and product images ----
+# Place the data pack in data/ after cloning (see README.md). Only data/README.md is tracked.
+data/*
+!data/README.md
+*.db
+*.db-journal
+*.sqlite
+
+# ---- Python ----
+backend/.venv/
+.venv/
+__pycache__/
+*.pyc
+
+# ---- Front end ----
+frontend/node_modules/
+frontend/dist/
+
+# ---- Runtime files ----
+backend/outbox/
+*.log
+.DS_Store
+Thumbs.db

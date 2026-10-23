@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Campus Customs: App Check</title>
+  <style>
+    :root { --yale-blue: #00356b; --blue-medium: #286dc0; --gray: #4a4a4a; --rule: #d9d4c7; --parchment: #f8f6f1; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--parchment); color: #222;
+      font-family: 'Libre Franklin', -apple-system, 'Segoe UI', Arial, sans-serif; line-height: 1.6;
+    }
+    header { background: var(--yale-blue); color: #fff; padding: 2.5rem 1.5rem 2rem; }
+    header p { margin: 0; color: #c9d9ec; letter-spacing: 0.2em; text-transform: uppercase; font-size: 0.75rem; }
+    h1, h2 { font-family: 'Cormorant Garamond', Garamond, Georgia, serif; font-weight: 600; line-height: 1.15; }
+    h1 { margin: 0.35rem 0 0; font-size: clamp(2rem, 4vw, 2.8rem); }
+    main { max-width: 1100px; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+    .intro { color: var(--gray); margin: 0 0 2rem; }
+    section.check {
+      background: #fff; border: 1px solid var(--rule); border-top: 4px solid var(--yale-blue);
+      padding: 1.5rem 1.5rem 1.75rem; margin-bottom: 2.25rem;
+    }
+    .check-number { color: var(--blue-medium); font-size: 0.75rem; letter-spacing: 0.2em; text-transform: uppercase; font-weight: 700; margin: 0; }
+    h2 { color: var(--yale-blue); font-size: clamp(1.5rem, 3vw, 2rem); margin: 0.25rem 0 1rem; }
+    figure { margin: 0; }
+    figure img { display: block; width: 100%; height: auto; border: 1px solid var(--rule); }
+    figcaption { font-size: 0.85rem; color: var(--gray); margin-top: 0.5rem; font-style: italic; }
+    .what { margin: 1rem 0 0; font-size: 1.02rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <p>Campus Customs &middot; Problem 11</p>
+    <h1>Site testing: app check</h1>
+  </header>
+
+  <main>
+    <p class="intro">Each check below documents one feature I tested on the Campus Customs site, with a screenshot of the test and a short note on what it shows.</p>
+
+    <section class="check" id="check-1">
+      <p class="check-number">Check 1</p>
+      <h2>Chat checking the inventory level of an item</h2>
+      <figure>
+        <img src="app_check_images/chat-inventory-check.webp"
+             alt="Chat on the Benjamin Franklin Fleece Jacket page answering that size Large has 2 in stock, low stock, at $98" />
+        <figcaption>Screenshot: Chat Inventory Check</figcaption>
+      </figure>
+      <p class="what">While viewing the Benjamin Franklin Fleece Jacket, I asked the chat how many Larges are in stock for the product I'm looking at. The chat understood which product was on the page and replied that there are 2 Larges, called out that it's low stock, and also gave the price ($98).</p>
+    </section>
+
+    <section class="check" id="check-2">
+      <p class="check-number">Check 2</p>
+      <h2>Dynamic search-result cards</h2>
+      <figure>
+        <img src="app_check_images/dynamic-tiles-for-quarter-zips.webp"
+             alt="After asking the chat for quarter zips, a From your chat panel shows the quarter-zip product tiles on the page" />
+        <figcaption>Screenshot: Dynamic Tiles for Quarter Zips</figcaption>
+      </figure>
+      <p class="what">I asked the chat if we have any quarter zips available, and the page updated on its own to show the tiles for all 11 products categorized as quarter zips, without my needing to change pages. The chat also confirmed the count and pointed me to the cards on the page.</p>
+    </section>
+
+    <section class="check" id="check-3">
+      <p class="check-number">Check 3</p>
+      <h2>Usability feature - no password communication</h2>
+      <figure>
+        <img src="app_check_images/usability-no-password-communication.webp"
+             alt="Repeated requests for the account password; the chat refuses each time and points to the self-service reset" />
+        <figcaption>Screenshot: Usability - No Password Communication</figcaption>
+      </figure>
+      <p class="what">I repeatedly asked the chat what my password is, which I instructed the agent never to reveal. Each time, the agent explained that it cannot share the password and directed me to reset it myself with the site's self-service "Forgot your password?" reset, which I also built into the website.</p>
+    </section>
+  </main>
+</body>
+</html>

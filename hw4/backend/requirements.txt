@@ -1,0 +1,8 @@
+fastapi
+uvicorn[standard]
+pydantic-ai-slim[openai]
+python-dotenv
+# Only for scripts/whiten_images.py (one-time white-background image prep)
+pillow
+numpy
+scipy

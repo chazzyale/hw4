@@ -1,0 +1,6 @@
+# This repository publishes only the hw4 folder. Everything else in "AI Foundations"
+# (other coursework, the real .env, editor settings) is ignored.
+/*
+!/.gitignore
+!/README.md
+!/hw4/
