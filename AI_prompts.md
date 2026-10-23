@@ -341,3 +341,27 @@
 > Yes, commit and push moving requirements.txt and .env.example into hw4/.
 
 **What was still lacking:** The move was made and tested locally but not yet published, so the GitHub repo still showed the files under backend/.
+
+**Follow-up prompt 5:**
+
+> If I'm to submit the repo URL for the grader to open and clone, is this the proper repo URL for hw4? https://github.com/chazzyale/ai-foundations-hw4/tree/main/hw4
+
+**What was still lacking:** It wasn't yet confirmed which URL to submit: the folder URL (/tree/main/hw4) opens in a browser but can't be cloned, so the repository URL https://github.com/chazzyale/ai-foundations-hw4 is the one to submit.
+
+**Follow-up prompt 6:**
+
+> Not now, leave the log change local.
+
+**What was still lacking:** Nothing was missing; this only decided to keep the latest log update local instead of pushing it.
+
+**Follow-up prompt 7:**
+
+> Ok, can you make it so that "ai-foundations-hw4" is renamed "hw4" as the assignment requires? The specific requirement is "Put your code in a folder named hw4 and push it to a public GitHub repository. On Canvas, submit the repo URL (the link graders can open and clone)." I want to make sure we have the exact naming convention as required
+
+**What was still lacking:** The repository name (ai-foundations-hw4) didn't match the assignment's hw4 naming, so the repo needed to be renamed hw4.
+
+**Follow-up prompt 8:**
+
+> Flatten the repo so the code is at the top level of the hw4 repo (cloning gives hw4/ with backend, frontend, etc. directly inside), then commit and push.
+
+**What was still lacking:** After the rename, cloning produced hw4/hw4/ because the code sat in a subfolder, so the repo needed the hw4 folder's contents at its top level.
